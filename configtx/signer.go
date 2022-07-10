@@ -42,9 +42,9 @@ func (s *SigningIdentity) Public() crypto.PublicKey {
 	return s.Certificate.PublicKey
 }
 
-// Sign performs ECDSA sign with this signing identity's private key on the
+// Sign performs ECDSA or ED25519 sign with this signing identity's private key on the
 // given message hashed using SHA-256. It ensures signatures are created with
-// Low S values since Fabric normalizes all signatures to Low S.
+// Low S values, for ECDSA, since Fabric normalizes all signatures to Low S.
 // See https://github.com/bitcoin/bips/blob/master/bip-0146.mediawiki#low_s
 // for more detail.
 func (s *SigningIdentity) Sign(reader io.Reader, msg []byte, opts crypto.SignerOpts) (signature []byte, err error) {
