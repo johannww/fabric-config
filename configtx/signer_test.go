@@ -9,6 +9,7 @@ package configtx
 import (
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
@@ -103,6 +104,30 @@ func TestCreateSignature(t *testing.T) {
 	gt := NewGomegaWithT(t)
 
 	cert, privateKey := generateCACertAndPrivateKey(t, "org1.example.com")
+	signingIdentity := SigningIdentity{
+		Certificate: cert,
+		PrivateKey:  privateKey,
+		MSPID:       "test-msp",
+	}
+
+	configSignature, err := signingIdentity.CreateConfigSignature([]byte("config"))
+	gt.Expect(err).NotTo(HaveOccurred())
+
+	sh, err := signingIdentity.signatureHeader()
+	gt.Expect(err).NotTo(HaveOccurred())
+	expectedCreator := sh.Creator
+	signatureHeader := &cb.SignatureHeader{}
+	err = proto.Unmarshal(configSignature.SignatureHeader, signatureHeader)
+	gt.Expect(err).NotTo(HaveOccurred())
+	gt.Expect(signatureHeader.Creator).To(Equal(expectedCreator))
+}
+
+func TestCreateSignatureEd25519(t *testing.T) {
+	t.Parallel()
+
+	gt := NewGomegaWithT(t)
+
+	cert, privateKey := generateCACertAndPrivateKeyEd25519(t, "org1.example.com")
 	signingIdentity := SigningIdentity{
 		Certificate: cert,
 		PrivateKey:  privateKey,
@@ -337,6 +362,25 @@ func generateCACertAndPrivateKey(t *testing.T, orgName string) (*x509.Certificat
 	return generateCertAndPrivateKey(t, template, template, nil)
 }
 
+// generateCACertAndPrivateKey returns CA cert and private key.
+func generateCACertAndPrivateKeyEd25519(t *testing.T, orgName string) (*x509.Certificate, crypto.PrivateKey) {
+	serialNumber := generateSerialNumber(t)
+	template := &x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			CommonName:   "ca." + orgName,
+			Organization: []string{orgName},
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	return generateCertAndPrivateKeyEd25519(t, template, template, nil)
+}
+
 func generateIntermediateCACertAndPrivateKey(t *testing.T, orgName string, rootCACert *x509.Certificate, rootPrivKey *ecdsa.PrivateKey) (*x509.Certificate, *ecdsa.PrivateKey) {
 	serialNumber := generateSerialNumber(t)
 	template := &x509.Certificate{
@@ -384,6 +428,25 @@ func generateCertAndPrivateKey(t *testing.T, template, parent *x509.Certificate,
 		parentPriv = priv
 	}
 	derBytes, err := x509.CreateCertificate(rand.Reader, template, parent, &priv.PublicKey, parentPriv)
+	gt.Expect(err).NotTo(HaveOccurred())
+
+	cert, err := x509.ParseCertificate(derBytes)
+	gt.Expect(err).NotTo(HaveOccurred())
+
+	return cert, priv
+}
+
+func generateCertAndPrivateKeyEd25519(t *testing.T, template, parent *x509.Certificate, parentPriv ed25519.PrivateKey) (*x509.Certificate, ed25519.PrivateKey) {
+	gt := NewGomegaWithT(t)
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	gt.Expect(err).NotTo(HaveOccurred())
+
+	if parentPriv == nil {
+		// create self-signed cert
+		parentPriv = priv
+	}
+	derBytes, err := x509.CreateCertificate(rand.Reader, template, parent, pub, parentPriv)
 	gt.Expect(err).NotTo(HaveOccurred())
 
 	cert, err := x509.ParseCertificate(derBytes)
